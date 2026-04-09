@@ -1,0 +1,33 @@
+/* src/assets/styles/main.css */
+@import 'tokens.css';
+@import 'base.css';
+
+/* Bootstrap imports (specific parts for grid and utilities) */
+/* We will use the CDN or direct node_modules reference in main.ts if needed, 
+   but for now we'll stick to our custom foundation. */
+
+.glass-card {
+  background: var(--bg-surface-glass);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+.electric-glow {
+  box-shadow: 0 0 15px var(--color-primary-glow);
+}
+
+.page-container {
+  padding: var(--spacing-xl);
+  max-width: 1400px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
