@@ -2,6 +2,7 @@
   "name": "bill-soft",
   "version": "0.0.0",
   "private": true,
+  "homepage": "https://Boominathan2355.github.io/erpbill/",
   "type": "module",
   "scripts": {
     "dev": "vite",
