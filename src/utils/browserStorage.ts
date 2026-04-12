@@ -3,24 +3,37 @@ export type ThemeMode = 'light' | 'dark'
 const hasWindow = typeof window !== 'undefined'
 const hasDocument = typeof document !== 'undefined'
 
-const getSafeStorage = (): Storage | null => {
-  if (!hasWindow) return null
+class InMemoryStorage implements Storage {
+  private data: Record<string, string> = {}
+  get length() { return Object.keys(this.data).length }
+  clear() { this.data = {} }
+  getItem(key: string) { return this.data[key] || null }
+  key(index: number) { return Object.keys(this.data)[index] || null }
+  removeItem(key: string) { delete this.data[key] }
+  setItem(key: string, value: string) { this.data[key] = String(value) }
+}
+
+const getSafeStorage = (): Storage => {
+  if (!hasWindow) return new InMemoryStorage()
+  
   try {
-    const storage = window.localStorage
+    // Check if the property itself throws or is inaccessible
+    const storage = window['localStorage']
+    if (!storage) return new InMemoryStorage()
+
+    // Test functionality
     const x = '__storage_test__'
     storage.setItem(x, x)
     storage.removeItem(x)
     return storage
   } catch (e) {
-    return null
+    return new InMemoryStorage()
   }
 }
 
 const safeStorage = getSafeStorage()
 
 export const readJSONStorage = <T>(key: string, fallback: T): T => {
-  if (!safeStorage) return fallback
-
   try {
     const rawValue = safeStorage.getItem(key)
     return rawValue ? JSON.parse(rawValue) as T : fallback
@@ -30,8 +43,6 @@ export const readJSONStorage = <T>(key: string, fallback: T): T => {
 }
 
 export const writeJSONStorage = <T>(key: string, value: T): void => {
-  if (!safeStorage) return
-
   try {
     safeStorage.setItem(key, JSON.stringify(value))
   } catch {
@@ -40,8 +51,6 @@ export const writeJSONStorage = <T>(key: string, value: T): void => {
 }
 
 export const readStringStorage = (key: string, fallback: string): string => {
-  if (!safeStorage) return fallback
-
   try {
     return safeStorage.getItem(key) || fallback
   } catch {
@@ -50,8 +59,6 @@ export const readStringStorage = (key: string, fallback: string): string => {
 }
 
 export const writeStringStorage = (key: string, value: string): void => {
-  if (!safeStorage) return
-
   try {
     safeStorage.setItem(key, value)
   } catch {
