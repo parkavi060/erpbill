@@ -7,50 +7,66 @@ import { useInvoiceStore } from '../stores/invoices'
 import { useSettingsStore } from '../stores/settings'
 import { useInvoiceBuilder } from '../composables/useInvoiceBuilder'
 import { formatCurrency } from '../utils/formatters'
+
 import BaseButton from '../components/atoms/BaseButton.vue'
-import BaseBadge from '../components/atoms/BaseBadge.vue'
-import BaseInput from '../components/atoms/BaseInput.vue'
-import BaseSearchSelect from '../components/atoms/BaseSearchSelect.vue'
-import BaseDatePicker from '../components/atoms/BaseDatePicker.vue'
 import AppIcon from '../components/atoms/AppIcon.vue'
-import InvoicePreview from '../components/organisms/InvoicePreview.vue'
+
+// Modular Components
+import InvoiceClientSection from '../components/organisms/InvoiceClientSection.vue'
+import InvoiceItemsTable from '../components/organisms/InvoiceItemsTable.vue'
+import InvoiceTotalsSection from '../components/organisms/InvoiceTotalsSection.vue'
 
 const router = useRouter()
 const clientStore = useClientStore()
 const productStore = useProductStore()
 const invoiceStore = useInvoiceStore()
 const settingsStore = useSettingsStore()
-const { invoice, isInterState, addItem, removeItem, calculateTotals } = useInvoiceBuilder(undefined, invoiceStore.getNextInvoiceNumber())
+
+const workflowStep = ref<'type-selection' | 'editor'>('type-selection')
+
+const { invoice, isInterState, addItem, removeItem, calculateTotals } = useInvoiceBuilder(
+  undefined, 
+  invoiceStore.getNextInvoiceNumber()
+)
 
 const isSaved = ref(false)
 
-const clientOptions = computed(() => 
-  clientStore.clients.map(c => ({ id: c.id, label: c.name, sublabel: c.email }))
-)
+// Dynamic Theme Mapping
+const themeColor = computed(() => {
+  switch (invoice.value.clientType) {
+    case 'b2b': return '#6366f1' // Indigo
+    case 'b2c': return '#10b981' // Emerald
+    case 'b2e': return '#8b5cf6' // Violet/Global
+    default: return '#6366f1'
+  }
+})
+
+const themeStyles = computed(() => ({
+  '--theme-primary': themeColor.value,
+  '--theme-primary-glow': `${themeColor.value}40` // 25% opacity
+}))
 
 const selectedClient = computed(() => 
   clientStore.clients.find(c => c.id === invoice.value.clientId)
 )
 
-watch(selectedClient, (client) => {
-  if (client) {
-    invoice.value.clientType = client.type
-    invoice.value.currency = client.currency || 'INR'
-    invoice.value.placeOfSupply = client.stateCode || ''
-    invoice.value.lutNumber = (client as any).lutNumber || ''
-    
-    isInterState.value = settingsStore.profile.stateCode !== client.stateCode
-    calculateTotals()
-  }
-})
+const selectType = (type: 'b2b' | 'b2c' | 'b2e') => {
+  invoice.value.clientType = type
+  invoice.value.clientId = ''
+  workflowStep.value = 'editor'
+}
 
-const productOptions = computed(() => 
-  productStore.products.map(p => ({ 
-    id: p.id, 
-    label: p.name, 
-    sublabel: `${formatCurrency(p.price, invoice.value.currency)} / ${p.unit}`
-  }))
-)
+const handleClientChange = (client: any) => {
+  invoice.value.clientId = client.id
+  invoice.value.clientType = client.type
+  invoice.value.currency = client.currency || 'INR'
+  invoice.value.placeOfSupply = client.stateCode || ''
+  invoice.value.lutNumber = client.lutNumber || ''
+  invoice.value.isTaxableExport = client.isTaxableExport || false
+  
+  isInterState.value = settingsStore.profile.stateCode !== client.stateCode
+  calculateTotals()
+}
 
 const handleSave = () => {
   if (!invoice.value.clientId || invoice.value.items.length === 0) {
@@ -72,230 +88,169 @@ const handleClose = () => {
   router.push('/invoices')
 }
 
-// Initial calculation
 onMounted(() => {
   calculateTotals()
 })
 </script>
 
 <template>
-  <div class="builder-layout">
-    <!-- Main Editor -->
-    <div class="editor-panel">
-      <header class="editor-header">
-        <div class="header-left">
-          <BaseButton variant="ghost" size="sm" icon="arrow-left" @click="router.back()">Back</BaseButton>
-          <h1>Create Invoice</h1>
-        </div>
-        <div class="header-right">
-          <!-- Removed redundant Save button to keep UI clean -->
-        </div>
-      </header>
+  <div class="unified-builder-container" :style="themeStyles">
+    <!-- 1. Type Selection Screen -->
+    <Transition name="fast-fade" mode="out-in">
+      <div v-if="workflowStep === 'type-selection'" class="selection-view">
+        <div class="selection-container">
+          <header class="selection-header">
+            <div class="header-badge">New Transaction</div>
+            <h1>Generate Invoice</h1>
+            <p>Choose the correct channel for tax compliance.</p>
+          </header>
 
-      <div class="editor-content">
-        <!-- 1. General Info -->
-        <section class="editor-section glass-card">
-          <div class="section-title">
-            <AppIcon name="users" :size="20" color="var(--color-primary)" />
-            <h3>Client & Dates</h3>
-          </div>
-          <div class="client-dates-grid">
-            <div class="client-select-wrapper">
-              <BaseSearchSelect 
-                v-model="invoice.clientId" 
-                label="Client"
-                :options="clientOptions"
-                placeholder="Search client..."
-              />
-              <div v-if="selectedClient" class="client-context-ribbon mt-2 p-2 glass-card rounded" style="font-size: 0.85rem; border-left: 3px solid var(--color-primary)">
-                <strong>Type:</strong> <BaseBadge :text="(selectedClient.type || 'B2B').toUpperCase()" variant="info" class="mx-1"/>
-                <strong class="ms-2">Tax ID:</strong> {{ selectedClient.gstin || selectedClient.taxId || 'N/A' }} 
-                <span v-if="invoice.clientType === 'b2e'" class="ms-2">
-                  <strong>LUT:</strong> {{ invoice.lutNumber || 'None' }}
-                </span>
-                <span v-if="invoice.clientType !== 'b2e'" class="ms-2">
-                  <strong>State:</strong> {{ selectedClient.stateCode || 'Unknown' }}
-                </span>
+          <div class="type-grid">
+            <button class="type-card glass-card ripple" @click="selectType('b2b')">
+              <div class="type-indicator indigo"></div>
+              <div class="icon-box b2b">
+                <AppIcon name="users" :size="32" />
               </div>
-            </div>
-            <BaseDatePicker v-model="invoice.date" label="Issue Date" />
-            <BaseDatePicker v-model="invoice.dueDate" label="Due Date" />
-          </div>
-        </section>
+              <div class="card-body">
+                <h3>B2B</h3>
+                <p>Tax invoice for business entities with GSTIN registration.</p>
+              </div>
+              <div class="card-footer">Select Type <AppIcon name="arrow-left" :size="14" class="rotate-180" /></div>
+            </button>
 
-        <!-- 2. Items Table -->
-        <section class="editor-section glass-card overflow-visible">
-          <div class="section-header">
-            <div class="section-title">
-              <AppIcon name="box" :size="20" color="var(--color-primary)" />
-              <h3>Items & Pricing</h3>
-            </div>
+            <button class="type-card glass-card ripple" @click="selectType('b2c')">
+              <div class="type-indicator emerald"></div>
+              <div class="icon-box b2c">
+                <AppIcon name="box" :size="32" />
+              </div>
+              <div class="card-body">
+                <h3>B2C</h3>
+                <p>Retail bill for consumers or unregistered persons.</p>
+              </div>
+              <div class="card-footer">Select Type <AppIcon name="arrow-left" :size="14" class="rotate-180" /></div>
+            </button>
+
+            <button class="type-card glass-card ripple" @click="selectType('b2e')">
+              <div class="type-indicator violet"></div>
+              <div class="icon-box b2e">
+                <AppIcon name="file-text" :size="32" />
+              </div>
+              <div class="card-body">
+                <h3>B2E / Export</h3>
+                <p>Foreign trade or SEZ supplies (Zero-rated or LUT).</p>
+              </div>
+              <div class="card-footer">Select Type <AppIcon name="arrow-left" :size="14" class="rotate-180" /></div>
+            </button>
           </div>
 
-          <div class="command-search-wrapper">
-             <AppIcon name="search" :size="20" class="search-icon" />
-             <BaseSearchSelect 
-                model-value=""
-                placeholder="Type to search and add products..."
-                :options="productOptions"
-                @change="opt => addItem(productStore.products.find(p => p.id === opt.id)!)"
-                class="big-search"
-                hide-chevron
-                show-only-on-search
-              />
+          <div class="selection-footer">
+            <button @click="router.back()" class="btn-cancel">Cancel and return</button>
           </div>
-
-          <div class="items-table-wrapper">
-            <table class="items-table">
-              <thead>
-                <tr>
-                  <th class="text-left">Item Name</th>
-                  <th class="text-center" width="100">Qty</th>
-                  <th class="text-right" width="140">Price</th>
-                  <th class="text-right" width="140">Total</th>
-                  <th width="50"></th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="item in invoice.items" :key="item.id">
-                  <td class="item-name-cell">
-                    {{ item.name }}
-                  </td>
-                  <td>
-                    <div class="qty-control">
-                      <input 
-                        type="number" 
-                        v-model.number="item.quantity" 
-                        @input="calculateTotals"
-                        min="1"
-                      />
-                    </div>
-                  </td>
-                  <td>
-                    <div class="price-edit">
-                      <span class="currency-symbol">{{ invoice.currency === 'USD' ? '$' : invoice.currency === 'EUR' ? '€' : '₹' }}</span>
-                      <input 
-                        type="number" 
-                        v-model.number="item.price" 
-                        @input="calculateTotals"
-                      />
-                    </div>
-                  </td>
-                  <td class="text-right font-bold">
-                    {{ formatCurrency(item.price * item.quantity, invoice.currency) }}
-                  </td>
-                  <td class="text-center">
-                    <button class="remove-btn" @click="removeItem(item.id)">
-                      <AppIcon name="trash" :size="16" />
-                    </button>
-                  </td>
-                </tr>
-                <tr v-if="invoice.items.length === 0">
-                  <td colspan="5" class="empty-state">
-                    No items added. Select a product from the list above.
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <!-- 3. Summary & Notes -->
-        <div class="grid-2 mt-lg">
-          <section class="editor-section glass-card">
-            <div class="section-title">
-              <AppIcon name="file-text" :size="20" color="var(--color-primary)" />
-              <h3>Notes & Terms</h3>
-            </div>
-            <BaseInput v-model="invoice.notes" label="Private Notes" placeholder="Internal remarks..." textarea />
-            <BaseInput v-model="invoice.terms" label="Terms & Conditions" placeholder="Payment terms, etc..." textarea class="mt-md" />
-          </section>
-
-          <section class="editor-section glass-card">
-            <div class="section-title">
-              <AppIcon name="percent" :size="20" color="var(--color-primary)" />
-              <h3>Adjustment & Totals</h3>
-            </div>
-            
-            <div class="discount-field">
-              <div class="grid-2" style="grid-template-columns: 2fr 1fr">
-                <BaseInput 
-                  v-model.number="invoice.discount" 
-                  label="Apply Discount" 
-                  type="number"
-                  @input="calculateTotals"
-                />
-                <div class="select-group">
-                  <label class="input-label">Type</label>
-                  <select v-model="invoice.discountType" @change="calculateTotals" class="custom-minimal-select">
-                    <option value="percentage">%</option>
-                    <option value="fixed">Fixed</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            <div class="totals-summary">
-              <div class="summary-line">
-                <span>Subtotal</span>
-                <span>{{ formatCurrency(invoice.subtotal, invoice.currency) }}</span>
-              </div>
-              <div class="summary-line">
-                <span v-if="invoice.clientType === 'b2e'">IGST @ 0% (Export)</span>
-                <span v-else-if="isInterState">IGST Total</span>
-                <span v-else>CGST + SGST Total</span>
-                <span>{{ formatCurrency(invoice.taxTotal, invoice.currency) }}</span>
-              </div>
-              <div v-if="invoice.discount > 0" class="summary-line discount">
-                <span>Discount</span>
-                <span>- {{ invoice.discountType === 'percentage' ? formatCurrency((invoice.subtotal * invoice.discount) / 100, invoice.currency) : formatCurrency(invoice.discount, invoice.currency) }}</span>
-              </div>
-              <div class="summary-line grand-total">
-                <span>Grand Total</span>
-                <span>{{ formatCurrency(invoice.totalAmount, invoice.currency) }}</span>
-              </div>
-            </div>
-          </section>
-        </div>
-
-        <!-- 4. Bottom Action -->
-        <div class="bottom-actions">
-           <div class="action-group">
-             <BaseButton variant="ghost" size="lg" @click="router.back()">Cancel</BaseButton>
-             <BaseButton variant="glow" size="lg" icon="plus" @click="handleSave">Save Invoice</BaseButton>
-           </div>
-           <p class="text-muted mt-md">Double check all details before saving.</p>
         </div>
       </div>
-    </div>
 
-    <!-- Post-Save Success Overlay -->
-    <Transition name="fade-slide">
-      <div v-if="isSaved" class="success-overlay">
-        <div class="overlay-content">
-          <div class="success-header">
-            <div class="success-info">
-              <div class="check-circle">
-                <AppIcon name="check" :size="32" color="#fff" />
-              </div>
-              <div>
-                <h2>Invoice Saved Successfully!</h2>
-                <p>Invoice #{{ invoice.invoiceNumber }} has been generated.</p>
-              </div>
-            </div>
-            <div class="success-actions">
-              <BaseButton variant="ghost" icon="printer">Print</BaseButton>
-              <BaseButton variant="ghost" icon="download">Download</BaseButton>
-              <BaseButton variant="glow" @click="handleClose">Back to Invoices</BaseButton>
+      <!-- 2. Main Builder Workspace -->
+      <div v-else class="main-workspace">
+        <header class="workspace-header">
+          <div class="header-left">
+            <button @click="workflowStep = 'type-selection'" class="btn-step-back">
+              <AppIcon name="arrow-left" :size="16" />
+            </button>
+            <div class="type-identity">
+              <span class="type-badge" :class="invoice.clientType">
+                {{ invoice.clientType === 'b2e' ? 'Export' : invoice.clientType?.toUpperCase() }}
+              </span>
+              <span class="invoice-title">New Invoice #{{ invoice.invoiceNumber }}</span>
             </div>
           </div>
-          
-          <div class="preview-container glass-card">
-            <InvoicePreview 
-              :invoice="invoice as any" 
-              :client="selectedClient" 
-              :business="settingsStore.profile" 
-            />
+          <div class="action-bar">
+             <BaseButton variant="ghost" @click="router.back()">Discard</BaseButton>
+             <button class="btn-save-primary" @click="handleSave">
+               <AppIcon name="check" :size="18" />
+               <span>Save Invoice</span>
+             </button>
+          </div>
+        </header>
+
+        <div class="workspace-content">
+          <div class="editor-grid">
+             <div class="editor-main">
+               <InvoiceClientSection 
+                 v-model="invoice" 
+                 :clients="clientStore.clients"
+                 @client-change="handleClientChange"
+               />
+
+               <InvoiceItemsTable 
+                 :items="invoice.items"
+                 :products="productStore.products"
+                 :currency="invoice.currency || 'INR'"
+                 @add-item="addItem"
+                 @remove-item="removeItem"
+                 @update-item="calculateTotals"
+                 class="mt-lg"
+               />
+
+               <InvoiceTotalsSection 
+                 v-model="invoice"
+                 :is-inter-state="isInterState"
+                 @recalculate="calculateTotals"
+                 class="mt-lg"
+               />
+
+               <div class="final-submit-zone mt-xl">
+                 <button class="btn-finalize" @click="handleSave">
+                   Finalize and Generate PDF
+                 </button>
+               </div>
+             </div>
+
+             <aside class="editor-summary">
+               <div class="summary-card glass-card sticky-top">
+                 <div class="summary-header">
+                   <h3>Live Summary</h3>
+                   <div class="status-pulse"></div>
+                 </div>
+                 
+                 <div class="summary-content">
+                    <div class="stat-row">
+                      <span class="label">Client</span>
+                      <span class="value">{{ selectedClient?.name || 'Not Selected' }}</span>
+                    </div>
+                    <div class="stat-row">
+                      <span class="label">Subtotal</span>
+                      <span class="value">{{ formatCurrency(invoice.subtotal, invoice.currency) }}</span>
+                    </div>
+                    <div class="stat-row">
+                      <span class="label">Tax (GST)</span>
+                      <span class="value text-theme">{{ formatCurrency(invoice.taxTotal, invoice.currency) }}</span>
+                    </div>
+                    <div class="stat-divider"></div>
+                    <div class="stat-row grand-total">
+                      <div class="total-label">Grand Total</div>
+                      <div class="total-amount">{{ formatCurrency(invoice.totalAmount, invoice.currency) }}</div>
+                    </div>
+                 </div>
+
+                 <div class="summary-actions">
+                   <BaseButton variant="ghost" class="full-width" icon="eye" @click="calculateTotals">Refresh Preview</BaseButton>
+                 </div>
+               </div>
+             </aside>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <!-- Success Overlay -->
+    <Transition name="fast-fade">
+      <div v-if="isSaved" class="success-screen">
+        <div class="success-card glass-card">
+          <div class="success-icon"><AppIcon name="check" :size="48" /></div>
+          <h2>Invoice Created!</h2>
+          <p>#{{ invoice.invoiceNumber }} has been added to your records.</p>
+          <div class="success-actions">
+             <BaseButton variant="glow" @click="handleClose">Return to Invoices</BaseButton>
           </div>
         </div>
       </div>
@@ -304,360 +259,135 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.builder-layout {
-  display: block;
-  height: 100vh;
-  overflow: hidden;
-  background: var(--bg-app);
-}
-
-/* Editor Panel Styles */
-.editor-panel {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  overflow-y: auto;
-  padding: var(--spacing-xl);
-  max-width: 1200px;
-  margin: 0 auto;
-}
-
-.editor-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: var(--spacing-xl);
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  min-height: 80px;
-  background: var(--bg-app);
-  margin: 0 -var(--spacing-xl) var(--spacing-xl);
-  padding: 0 var(--spacing-xl);
-}
-
-.editor-header::after {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: var(--border-color);
-  opacity: 0.8;
-}
-
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-md);
-}
-
-.header-left h1 { 
-  margin: 0; 
-  font-size: 1.75rem; 
-  font-weight: 800;
-  letter-spacing: -0.5px;
-  line-height: 1;
-}
-
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-}
-
-.editor-content {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-lg);
-  padding-bottom: 100px; /* Space for scroll */
-}
-
-.editor-section {
-  padding: var(--spacing-lg);
-}
-
-.section-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: var(--spacing-md);
-}
-
-.section-title {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-  margin-bottom: var(--spacing-md);
+.unified-builder-container { 
+  min-height: 100vh; 
+  background: var(--bg-app); 
   color: var(--text-main);
 }
 
-.section-title h3 { 
-  margin: 0; 
-  font-size: 1rem; 
-  font-weight: 700;
-  line-height: 1.2;
+/* Selection Screen */
+.selection-view {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 40px;
 }
 
-.section-title :deep(.svg-icon) {
-  margin-top: -1px;
-}
-.section-header .section-title { margin-bottom: 0; }
+.selection-container { max-width: 1000px; width: 100%; }
 
-.command-search-wrapper {
-  margin-bottom: var(--spacing-lg);
+.selection-header { text-align: center; margin-bottom: 48px; }
+.header-badge { display: inline-block; padding: 4px 12px; border-radius: 50px; background: rgba(99, 102, 241, 0.1); color: #6366f1; font-weight: 700; font-size: 0.75rem; text-transform: uppercase; margin-bottom: 12px; }
+.selection-header h1 { font-size: 2.5rem; font-weight: 800; color: var(--text-main); margin-bottom: 8px; }
+.selection-header p { color: var(--text-muted); font-size: 1.1rem; }
+
+.type-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+
+.type-card {
   position: relative;
   display: flex;
-  align-items: center;
-  background: rgba(255, 255, 255, 0.03);
-  border-radius: var(--radius-md);
-  padding-left: var(--spacing-md);
-  border: 1px dashed var(--border-color);
-  transition: all 0.2s ease;
-}
-
-.command-search-wrapper:focus-within {
-  border-color: var(--color-primary);
-  background: rgba(255, 255, 255, 0.05);
-  border-style: solid;
-}
-
-.command-search-wrapper .search-icon {
-  color: var(--text-muted);
-}
-
-.big-search {
-  flex: 1;
-}
-
-:deep(.big-search .input-wrapper) {
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-}
-
-/* Items Table */
-.items-table-wrapper {
-  margin: 0 -var(--spacing-lg);
-}
-
-.items-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.items-table th {
-  padding: var(--spacing-sm) var(--spacing-lg);
-  background: rgba(255, 255, 255, 0.02);
-  color: var(--text-muted);
-  font-size: 0.75rem;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-.items-table td {
-  padding: var(--spacing-md) var(--spacing-lg);
-  border-bottom: 1px solid var(--border-color);
-}
-
-.item-name-cell { font-weight: 600; color: var(--text-main); }
-
-.qty-control input, .price-edit input {
-  background: var(--bg-app);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  color: var(--text-main);
-  padding: 4px 8px;
-  width: 100%;
-  text-align: right;
-  outline: none;
-}
-
-.price-edit {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.remove-btn {
-  background: transparent;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  padding: 4px;
-  border-radius: var(--radius-sm);
-}
-
-.remove-btn:hover { color: var(--color-danger); background: rgba(239, 68, 68, 0.1); }
-
-.empty-state { text-align: center; padding: 40px !important; color: var(--text-muted); font-style: italic; }
-
-/* Totals Summary */
-.totals-summary {
-  margin-top: var(--spacing-lg);
-  display: flex;
   flex-direction: column;
-  gap: var(--spacing-sm);
-}
-
-.summary-line {
-  display: flex;
-  justify-content: space-between;
-  color: var(--text-muted);
-}
-
-.summary-line.grand-total {
-  margin-top: var(--spacing-md);
-  padding-top: var(--spacing-md);
-  border-top: 2px solid var(--border-color);
-  font-size: 1.25rem;
-  font-weight: 800;
-  color: var(--color-primary);
-}
-
-.discount { color: var(--color-danger); }
-
-/* Minimal Select Styles */
-.custom-minimal-select {
-  height: 44px;
-  width: 100%;
-  background: var(--bg-surface);
+  padding: 32px 24px;
+  background: var(--bg-surface-glass);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  color: var(--text-main);
-  padding: 0 8px;
-  outline: none;
+  text-align: left;
+  border-radius: 20px;
+  overflow: hidden;
+  transition: all 0.2s ease-out;
 }
 
-.input-label { font-size: 0.875rem; font-weight: 600; margin-bottom: 4px; display: block; }
+.type-card:hover { transform: translateY(-4px); border-color: var(--theme-primary); box-shadow: 0 12px 24px rgba(0,0,0,0.1); }
 
-/* Success Overlay */
-.success-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.85);
-  backdrop-filter: blur(8px);
-  z-index: 1000;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  padding: var(--spacing-xl);
+.type-indicator { position: absolute; top: 0; left: 0; right: 0; height: 4px; }
+.type-indicator.indigo { background: #6366f1; }
+.type-indicator.emerald { background: #10b981; }
+.type-indicator.violet { background: #8b5cf6; }
+
+.icon-box {
+  width: 56px; height: 56px; border-radius: 12px;
+  display: flex; justify-content: center; align-items: center;
+  margin-bottom: 24px;
 }
+.icon-box.b2b { background: rgba(99, 102, 241, 0.1); color: #6366f1; }
+.icon-box.b2c { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+.icon-box.b2e { background: rgba(139, 92, 246, 0.1); color: #8b5cf6; }
 
-.overlay-content {
-  width: 100%;
-  max-width: 1000px;
-  height: 90vh;
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-lg);
+.type-card h3 { font-size: 1.25rem; font-weight: 700; margin-bottom: 12px; }
+.type-card p { font-size: 0.9rem; color: var(--text-muted); line-height: 1.5; margin-bottom: 24px; flex-grow: 1; }
+
+.card-footer { font-size: 0.8rem; font-weight: 700; color: var(--text-muted); display: flex; align-items: center; gap: 8px; }
+.type-card:hover .card-footer { color: var(--theme-primary); }
+.rotate-180 { transform: rotate(180deg); }
+
+.selection-footer { text-align: center; margin-top: 40px; }
+.btn-cancel { background: transparent; border: none; color: var(--text-muted); cursor: pointer; text-decoration: underline; font-weight: 500; }
+
+/* Workspace UI */
+.main-workspace { max-width: 1400px; margin: 0 auto; padding: 0 24px; min-height: 100vh; }
+.workspace-header { 
+  display: flex; border-bottom: 1px solid var(--border-color);
+  justify-content: space-between; align-items: center; padding: 20px 0; margin-bottom: 32px; 
 }
+.header-left { display: flex; align-items: center; gap: 16px; }
+.btn-step-back { width: 36px; height: 36px; border-radius: 10px; border: 1px solid var(--border-color); background: transparent; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-muted); }
+.btn-step-back:hover { background: var(--border-color); color: var(--text-main); }
 
-.success-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: var(--bg-surface);
-  padding: var(--spacing-lg) var(--spacing-xl);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--border-color);
+.type-identity { display: flex; align-items: center; gap: 12px; }
+.type-badge { padding: 4px 10px; border-radius: 6px; font-weight: 700; font-size: 0.7rem; color: #fff; }
+.type-badge.b2b { background: #6366f1; }
+.type-badge.b2c { background: #10b981; }
+.type-badge.b2e { background: #8b5cf6; }
+.invoice-title { font-weight: 700; font-size: 1.1rem; }
+
+.btn-save-primary {
+  display: flex; align-items: center; gap: 8px; padding: 8px 20px;
+  background: var(--theme-primary); color: white; border: none; border-radius: 8px;
+  font-weight: 700; font-size: 0.9rem; cursor: pointer; transition: transform 0.1s;
 }
+.btn-save-primary:hover { box-shadow: 0 0 15px var(--theme-primary-glow); transform: translateY(-1px); }
 
-.success-info {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-md);
+.workspace-content { padding-bottom: 60px; }
+.editor-grid { display: grid; grid-template-columns: 1fr 320px; gap: 32px; }
+
+/* HUD Sidebar */
+.summary-card { padding: 24px; border-top: 4px solid var(--theme-primary); }
+.summary-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+.summary-header h3 { font-size: 1.1rem; font-weight: 700; margin: 0; }
+.status-pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--theme-primary); box-shadow: 0 0 8px var(--theme-primary); }
+
+.stat-row { display: flex; justify-content: space-between; margin-bottom: 12px; font-size: 0.95rem; }
+.stat-row .label { color: var(--text-muted); }
+.stat-row .value { font-weight: 600; text-align: right; }
+.text-theme { color: var(--theme-primary); }
+.stat-divider { height: 1px; background: var(--border-color); margin: 20px 0; }
+
+.grand-total { flex-direction: column; gap: 4px; }
+.total-label { font-size: 0.8rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; }
+.total-amount { font-size: 1.75rem; font-weight: 800; color: var(--text-main); }
+
+.summary-actions { margin-top: 24px; }
+
+.final-submit-zone { text-align: center; }
+.btn-finalize {
+  width: 100%; padding: 16px; border-radius: 12px; border: 2px dashed var(--theme-primary);
+  background: transparent; color: var(--theme-primary); font-weight: 700; 
+  cursor: pointer; transition: all 0.2s;
 }
+.btn-finalize:hover { background: var(--theme-primary); color: white; border-style: solid; }
 
-.check-circle {
-  width: 48px;
-  height: 48px;
-  background: var(--color-success);
-  border-radius: 50%;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  box-shadow: 0 0 20px rgba(16, 185, 129, 0.4);
+/* Transitions */
+.fast-fade-enter-active, .fast-fade-leave-active { transition: opacity 0.15s ease; }
+.fast-fade-enter-from, .fast-fade-leave-to { opacity: 0; }
+
+.success-screen { position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); z-index: 100; display: flex; align-items: center; justify-content: center; }
+.success-card { max-width: 400px; padding: 40px; text-align: center; border-top: 8px solid var(--theme-primary); }
+.success-icon { width: 80px; height: 80px; border-radius: 50%; background: var(--bg-app); border: 2px solid var(--theme-primary); color: var(--theme-primary); display: flex; align-items: center; justify-content: center; margin: 0 auto 24px; }
+
+.mt-xl { margin-top: 40px; }
+.full-width { width: 100%; }
+
+@media (max-width: 1100px) {
+  .editor-grid { grid-template-columns: 1fr; }
+  .editor-summary { display: none; }
 }
-
-.success-info h2 { margin: 0; font-size: 1.5rem; }
-.success-info p { margin: 4px 0 0; color: var(--text-muted); }
-
-.success-actions {
-  display: flex;
-  gap: var(--spacing-sm);
-}
-
-.preview-container {
-  flex: 1;
-  overflow-y: auto;
-  border-radius: var(--radius-lg);
-  padding: var(--spacing-md);
-  background: rgba(0, 0, 0, 0.2);
-}
-
-/* Animations */
-.fade-slide-enter-active,
-.fade-slide-leave-active {
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.fade-slide-enter-from,
-.fade-slide-leave-to {
-  opacity: 0;
-  transform: translateY(20px) scale(0.98);
-}
-
-/* Helpers */
-.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--spacing-md); }
-.client-dates-grid { 
-  display: grid; 
-  grid-template-columns: 1.2fr 1fr 1fr; 
-  gap: var(--spacing-lg); 
-}
-.mt-lg { margin-top: var(--spacing-lg); }
-.mt-md { margin-top: var(--spacing-md); }
-.font-bold { font-weight: 700; }
-.text-left { text-align: left; }
-.text-right { text-align: right; }
-.text-center { text-align: center; }
-.overflow-visible { overflow: visible !important; }
-
-/* Responsive adjustments */
-@media (max-width: 1200px) {
-  .editor-panel { padding: var(--spacing-lg); }
-  .success-header { flex-direction: column; text-align: center; gap: var(--spacing-lg); }
-  .success-actions { width: 100%; justify-content: center; }
-}
-
-.bottom-actions {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  margin-top: var(--spacing-xxl);
-  padding: var(--spacing-xxxl) 0;
-  border-top: 1px solid var(--border-color);
-  background: linear-gradient(to bottom, transparent, rgba(255, 255, 255, 0.02));
-}
-
-.action-group {
-  display: flex;
-  gap: var(--spacing-lg);
-  align-items: center;
-}
-
-.action-group :deep(.base-button) {
-  min-width: 160px;
-  height: 52px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.text-muted { color: var(--text-muted); }
 </style>
-e>

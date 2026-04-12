@@ -17,16 +17,11 @@ export const useProductStore = defineStore('products', () => {
   const updateProduct = (id: string, updatedProduct: Partial<Product>) => {
     const index = products.value.findIndex(p => p.id === id)
     if (index !== -1) {
-      const currentProduct = products.value[index]!
+      // Use full spread to ensure all metadata like hsnCode is preserved/updated
       products.value[index] = {
-        ...currentProduct,
+        ...products.value[index]!,
         ...updatedProduct,
-        id: currentProduct.id,
-        name: updatedProduct.name ?? currentProduct.name,
-        description: updatedProduct.description ?? currentProduct.description,
-        price: updatedProduct.price ?? currentProduct.price,
-        unit: updatedProduct.unit ?? currentProduct.unit,
-        taxRate: updatedProduct.taxRate ?? currentProduct.taxRate
+        id // Prevent ID change
       }
     }
   }

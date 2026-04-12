@@ -1,61 +1,68 @@
 /* src/utils/taxUtils.ts */
 
-import type { ClientType } from '../types'
-
-export interface TaxBreakdown {
+/**
+ * Interface for GST Calculation Result
+ */
+export interface GSTResult {
+  baseAmount: number
+  totalTax: number
   cgst: number
   sgst: number
   igst: number
-  totalTax: number
+  rate: number
 }
 
 /**
- * Calculate GST breakdown based on amount, rate, client type, and inter-state status
- * @param amount The base amount
- * @param rate Total GST rate (e.g. 18 for 18%)
- * @param clientType 'b2b', 'b2c', or 'b2e'
- * @param isInterState Whether it's an inter-state sale (IGST) or intra-state (CGST/SGST)
+ * Calculate GST from a Tax Inclusive amount
+ * Formula: Base = Total / (1 + Rate/100)
  */
 export const calculateGST = (
-  amount: number, 
+  grossAmount: number, 
   rate: number, 
-  clientType: ClientType = 'b2b',
-  isInterState: boolean = false
-): TaxBreakdown => {
-  // Export (B2E) is zero-rated under LUT unless configured otherwise
-  if (clientType === 'b2e') {
+  clientType: string = 'b2b',
+  isInterState: boolean = false,
+  isTaxableExport: boolean = false
+): GSTResult => {
+  // If Export and using LUT (not taxable), tax is 0
+  if (clientType === 'b2e' && !isTaxableExport) {
     return {
+      baseAmount: grossAmount,
+      totalTax: 0,
       cgst: 0,
       sgst: 0,
       igst: 0,
-      totalTax: 0
+      rate: rate
     }
   }
 
-  const totalTax = (amount * rate) / 100
-  
-  if (isInterState) {
+  const baseAmount = grossAmount / (1 + rate / 100)
+  const totalTax = grossAmount - baseAmount
+
+  if (isInterState || clientType === 'b2e') {
     return {
+      baseAmount,
+      totalTax,
       cgst: 0,
       sgst: 0,
       igst: totalTax,
-      totalTax
+      rate
     }
   }
 
-  // Intra-state split (50/50)
-  const halfTax = totalTax / 2
   return {
-    cgst: halfTax,
-    sgst: halfTax,
+    baseAmount,
+    totalTax,
+    cgst: totalTax / 2,
+    sgst: totalTax / 2,
     igst: 0,
-    totalTax
+    rate
   }
 }
 
 /**
- * Simple calculation for non-GST taxes
+ * Check if a B2C transaction is "Large" (Exceeds ₹2.5 Lakhs and is Inter-state)
+ * According to GSTR-1 Table 5 standards.
  */
-export const calculateTax = (amount: number, rate: number): number => {
-  return (amount * rate) / 100
+export const isB2CLarge = (totalAmount: number, isInterState: boolean, clientType: string) => {
+  return clientType === 'b2c' && isInterState && totalAmount > 250000
 }

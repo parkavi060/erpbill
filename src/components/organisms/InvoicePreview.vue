@@ -1,360 +1,277 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Invoice, Client, BusinessProfile } from '../../types'
-import { formatCurrency } from '../../utils/formatters'
+import { formatCurrency, numberToWords, formatDate } from '../../utils/formatters'
+import { STATE_MAP } from '../../utils/constants'
 
 interface Props {
   invoice: Invoice
   client?: Client
   business: BusinessProfile
+  mini?: boolean
 }
 
 const props = defineProps<Props>()
 
-const formatDate = (timestamp: number) => {
-  return new Date(timestamp).toLocaleDateString('en-IN', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric'
-  })
+const getStateLabel = (code?: string) => {
+  if (!code) return 'Not Specified'
+  const name = STATE_MAP[code]
+  return name ? `${name} (${code})` : `Other (${code})`
 }
 
-const isInterState = computed(() => props.business.stateCode !== props.client?.stateCode)
+const isInterState = computed(() => props.business.stateCode !== (props.client?.stateCode || props.invoice.placeOfSupply))
 
-const cgstTotal = computed(() => props.invoice.items.reduce((sum, item) => sum + (props.invoice.clientType !== 'b2e' && !isInterState.value ? item.taxAmount / 2 : 0), 0))
-const sgstTotal = computed(() => props.invoice.items.reduce((sum, item) => sum + (props.invoice.clientType !== 'b2e' && !isInterState.value ? item.taxAmount / 2 : 0), 0))
-const igstTotal = computed(() => props.invoice.items.reduce((sum, item) => sum + (props.invoice.clientType !== 'b2e' && isInterState.value ? item.taxAmount : 0), 0))
+// Formal Export Declaration (Rule 46)
+const exportDeclaration = computed(() => {
+  if (props.invoice.clientType !== 'b2e') return ''
+  return props.invoice.isTaxableExport 
+    ? 'SUPPLY MEANT FOR EXPORT ON PAYMENT OF INTEGRATED TAX'
+    : 'SUPPLY MEANT FOR EXPORT UNDER BOND OR LETTER OF UNDERTAKING WITHOUT PAYMENT OF INTEGRATED TAX'
+})
 
-const discountAmount = computed(() => {
-  if (props.invoice.discountType === 'percentage') {
-    return (props.invoice.subtotal * props.invoice.discount) / 100
-  }
-  return props.invoice.discount
+// HSN Summary Calculation
+const hsnSummary = computed(() => {
+  const summary: Record<string, { hsn: string, taxable: number, cgst: number, sgst: number, igst: number, rate: number }> = {}
+  
+  props.invoice.items.forEach(item => {
+    const hsn = item.hsnCode || 'N/A'
+    if (!summary[hsn]) {
+      summary[hsn] = { hsn, taxable: 0, cgst: 0, sgst: 0, igst: 0, rate: item.taxRate }
+    }
+    
+    // Reverse calculate taxable base from the line total (which already includes proportional discount)
+    const baseAmount = item.total / (1 + item.taxRate / 100)
+    const taxAmount = item.total - baseAmount
+    
+    summary[hsn].taxable += baseAmount
+    
+    if (props.invoice.clientType === 'b2e' && !props.invoice.isTaxableExport) {
+      // Zero-rated LUT export
+    } else if (isInterState.value || props.invoice.clientType === 'b2e') {
+      summary[hsn].igst += taxAmount
+    } else {
+      summary[hsn].cgst += taxAmount / 2
+      summary[hsn].sgst += taxAmount / 2
+    }
+  })
+  
+  return Object.values(summary)
 })
 </script>
 
 <template>
-  <div class="invoice-preview-canvas">
+  <div class="invoice-preview-canvas" :class="{ 'is-mini': mini }">
     <div class="invoice-paper">
-      <!-- Watermark or Header -->
+      <!-- 1. OFFICIAL HEADER -->
       <div class="paper-header">
         <div class="brand">
           <div v-if="business.logo" class="logo-circle">
              <img :src="business.logo" alt="Logo" />
           </div>
           <div class="brand-info">
-            <h2>{{ business.name || 'Your Company' }}</h2>
-            <p>{{ business.address || 'Address not set' }}</p>
+            <h2 class="m-0">{{ business.name }}</h2>
+            <p class="address">{{ business.address }}</p>
+            <p><strong>GSTIN:</strong> {{ business.gstin }}</p>
+            <p><strong>State:</strong> {{ getStateLabel(business.stateCode) }}</p>
             <p>{{ business.email }} | {{ business.phone }}</p>
-            <p v-if="business.gstin">GSTIN: {{ business.gstin }}</p>
           </div>
         </div>
         <div class="invoice-meta">
           <div class="document-type">{{ invoice.clientType === 'b2e' ? 'EXPORT INVOICE' : 'TAX INVOICE' }}</div>
-          <p class="inv-num">#{{ invoice.invoiceNumber || 'DRAFT' }}</p>
-          <div class="dates mt-sm">
-            <div class="date-row">
+          <div class="meta-grid mt-md">
+            <div class="meta-item">
+              <span class="label">Invoice No:</span>
+              <span class="value">#{{ invoice.invoiceNumber }}</span>
+            </div>
+            <div class="meta-item">
               <span class="label">Date:</span>
               <span class="value">{{ formatDate(invoice.date) }}</span>
             </div>
-            <div class="date-row">
-              <span class="label">Due Date:</span>
-              <span class="value">{{ formatDate(invoice.dueDate) }}</span>
+            <div class="meta-item">
+              <span class="label">Place of Supply:</span>
+              <span class="value">{{ getStateLabel(client?.stateCode || invoice.placeOfSupply) }}</span>
             </div>
           </div>
         </div>
       </div>
 
-      <div class="billing-info">
-        <div class="bill-to">
-          <span class="section-title">BILL TO</span>
-          <div v-if="client" class="client-details">
+      <!-- 2. BILLING INFO -->
+      <div class="billing-grid">
+        <div class="bill-box">
+          <div class="section-title">BILL TO</div>
+          <div v-if="client" class="details">
             <h4 class="m-0">{{ client.name }}</h4>
             <p>{{ client.address }}</p>
-            <p>{{ client.email }}</p>
-            <p v-if="client.gstin">GSTIN: {{ client.gstin }}</p>
-            <p v-if="invoice.clientType === 'b2e' && invoice.lutNumber">LUT No: {{ invoice.lutNumber }}</p>
+            <p v-if="client.gstin"><strong>GSTIN:</strong> {{ client.gstin }}</p>
+            <p v-if="client.stateCode"><strong>State:</strong> {{ getStateLabel(client.stateCode) }}</p>
+            <p v-if="invoice.clientType === 'b2e' && invoice.lutNumber"><strong>LUT No:</strong> {{ invoice.lutNumber }}</p>
           </div>
-          <div v-else class="placeholder-text">
-            Select a client to see billing details
-          </div>
+        </div>
+        <div class="compliance-box text-right">
+           <div class="compliance-item">
+              <span class="label">Reverse Charge:</span>
+              <span class="value">{{ invoice.reverseCharge ? 'Yes' : 'No' }}</span>
+           </div>
         </div>
       </div>
 
+      <!-- 3. ITEMS TABLE (Official Format) -->
       <table class="invoice-table">
         <thead>
           <tr>
-            <th class="text-left">DESCRIPTION</th>
-            <th class="text-right">QTY</th>
-            <th class="text-right">RATE</th>
-            <th class="text-right">AMOUNT</th>
+            <th width="40">#</th>
+            <th class="text-left">Description</th>
+            <th width="100">HSN/SAC</th>
+            <th class="text-right" width="60">Qty</th>
+            <th class="text-right" width="100">Rate (Incl)</th>
+            <th class="text-right" width="120">Amount</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="item in invoice.items" :key="item.id">
+          <tr v-for="(item, index) in invoice.items" :key="item.id">
+            <td class="text-center">{{ index + 1 }}</td>
             <td>
               <div class="item-name">{{ item.name }}</div>
             </td>
+            <td class="text-center">{{ item.hsnCode || '-' }}</td>
             <td class="text-right">{{ item.quantity }}</td>
             <td class="text-right">{{ formatCurrency(item.price, invoice.currency) }}</td>
-            <td class="text-right">{{ formatCurrency(item.price * item.quantity, invoice.currency) }}</td>
-          </tr>
-          <tr v-if="invoice.items.length === 0">
-            <td colspan="4" class="empty-placeholder">No items added yet</td>
+            <td class="text-right">{{ formatCurrency(item.total, invoice.currency) }}</td>
           </tr>
         </tbody>
       </table>
 
-      <div class="invoice-foot">
-        <div class="terms-notes">
-          <div v-if="invoice.notes" class="notes-block">
-            <span class="section-title">NOTES</span>
-            <p>{{ invoice.notes }}</p>
-          </div>
-          <div v-if="invoice.terms" class="notes-block mt-md">
-            <span class="section-title">TERMS & CONDITIONS</span>
-            <p>{{ invoice.terms }}</p>
-          </div>
-        </div>
-        <div class="totals-block">
-          <div class="summary-line">
-            <span>Subtotal</span>
-            <span>{{ formatCurrency(invoice.subtotal, invoice.currency) }}</span>
+      <!-- 4. TOTALS & TAX SUMMARY -->
+      <div class="footer-grid">
+        <div class="left-col">
+          <div v-if="exportDeclaration" class="export-note">
+            {{ exportDeclaration }}
           </div>
           
-          <template v-if="invoice.clientType === 'b2e'">
-            <div class="summary-line">
-              <span>IGST (Export under LUT)</span>
-              <span>{{ formatCurrency(0, invoice.currency) }}</span>
-            </div>
-          </template>
-          <template v-else-if="isInterState">
-            <div class="summary-line" v-if="igstTotal > 0">
-              <span>IGST Total</span>
-              <span>{{ formatCurrency(igstTotal, invoice.currency) }}</span>
-            </div>
-          </template>
-          <template v-else>
-            <div class="summary-line" v-if="cgstTotal > 0">
-              <span>CGST Total</span>
-              <span>{{ formatCurrency(cgstTotal, invoice.currency) }}</span>
-            </div>
-            <div class="summary-line" v-if="sgstTotal > 0">
-              <span>SGST Total</span>
-              <span>{{ formatCurrency(sgstTotal, invoice.currency) }}</span>
-            </div>
-          </template>
-
-          <div v-if="invoice.discount > 0" class="summary-line discount">
-            <span>Discount {{ invoice.discountType === 'percentage' ? `(${invoice.discount}%)` : '' }}</span>
-            <span>- {{ formatCurrency(discountAmount, invoice.currency) }}</span>
+          <!-- HSN Summary Table -->
+          <div class="tax-summary-wrapper mt-md">
+            <div class="summary-title">Tax Summary Breakdown</div>
+            <table class="tax-table">
+              <thead>
+                <tr>
+                  <th>HSN</th>
+                  <th>Taxable Value</th>
+                  <th v-if="!isInterState">CGST</th>
+                  <th v-if="!isInterState">SGST</th>
+                  <th v-if="isInterState">IGST</th>
+                  <th>Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="h in hsnSummary" :key="h.hsn">
+                  <td>{{ h.hsn }}</td>
+                  <td>{{ formatCurrency(h.taxable, invoice.currency) }}</td>
+                  <td v-if="!isInterState">{{ formatCurrency(h.cgst, invoice.currency) }}</td>
+                  <td v-if="!isInterState">{{ formatCurrency(h.sgst, invoice.currency) }}</td>
+                  <td v-if="isInterState">{{ formatCurrency(h.igst, invoice.currency) }}</td>
+                  <td>{{ formatCurrency(h.cgst + h.sgst + h.igst, invoice.currency) }}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
-          <div class="summary-line grand-total">
-            <span>Grand Total</span>
-            <span>{{ formatCurrency(invoice.totalAmount, invoice.currency) }}</span>
+
+          <div class="amount-words mt-md">
+            <span class="label">Amount in Words:</span>
+            <div class="value">{{ numberToWords(Math.round(invoice.totalAmount)) }}</div>
+          </div>
+
+          <div class="bank-details mt-lg" v-if="business.bankName">
+             <div class="summary-title">Bank Details</div>
+             <p><strong>Bank:</strong> {{ business.bankName }}</p>
+             <p><strong>A/c No:</strong> {{ business.bankAccountNo }}</p>
+             <p><strong>IFSC:</strong> {{ business.bankIFSC }}</p>
           </div>
         </div>
+
+        <div class="right-col">
+          <div class="totals-block">
+             <div class="row">
+               <span>Total Taxable Value</span>
+               <span>{{ formatCurrency(invoice.subtotal, invoice.currency) }}</span>
+             </div>
+             <div class="row">
+               <span>Total Tax Amount</span>
+               <span>{{ formatCurrency(invoice.taxTotal, invoice.currency) }}</span>
+             </div>
+             <div class="row grand-total">
+               <span>Grand Total</span>
+               <span>{{ formatCurrency(invoice.totalAmount, invoice.currency) }}</span>
+             </div>
+          </div>
+          
+          <div class="signature-block mt-xxl">
+             <div class="sig-space"></div>
+             <p class="sig-label">Authorized Signatory</p>
+             <p class="sig-company">For {{ business.name }}</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="footer-disclaimer mt-xl">
+        <p>Certified that the particulars given above are true and correct.</p>
+        <p>This is a computer generated invoice.</p>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.invoice-preview-canvas {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  justify-content: center;
-  padding: var(--spacing-md);
-  background: var(--bg-app);
-  overflow-y: auto;
-  min-height: 800px;
-}
+.invoice-preview-canvas { width: 100%; display: flex; justify-content: center; }
+.invoice-preview-canvas.is-mini { padding: 0; transform: scale(0.6); transform-origin: top center; }
 
 .invoice-paper {
-  background: #fff;
-  width: 100%;
-  max-width: 800px;
-  min-height: 1000px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
-  padding: 60px;
-  color: #1a1a1a;
-  display: flex;
-  flex-direction: column;
+  background: white; width: 800px; min-height: 1100px; padding: 40px;
+  box-shadow: 0 0 20px rgba(0,0,0,0.1); color: #1a1a1a;
+  font-family: 'Inter', sans-serif; display: flex; flex-direction: column;
 }
 
-.paper-header {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 50px;
-}
+.paper-header { display: flex; justify-content: space-between; border-bottom: 2px solid #000; padding-bottom: 20px; }
+.brand-info h2 { font-weight: 800; font-size: 1.4rem; color: #000; }
+.brand-info p { margin: 2px 0; font-size: 0.85rem; color: #444; }
+.logo-circle { width: 60px; height: 60px; background: #eee; border-radius: 8px; margin-bottom: 10px; overflow: hidden; }
+.logo-circle img { width: 100%; height: 100%; object-fit: contain; }
 
-.brand {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--spacing-md);
-}
+.document-type { font-size: 2rem; font-weight: 900; color: #000; text-align: right; }
+.meta-grid { display: grid; gap: 4px; font-size: 0.85rem; }
+.meta-item { display: flex; justify-content: flex-end; gap: 10px; }
+.meta-item .label { color: #666; font-weight: 600; }
+.meta-item .value { font-weight: 700; color: #000; }
 
-.logo-circle {
-  width: 80px;
-  height: 80px;
-  min-width: 80px;
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  background: #f8fafc;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid #f1f5f9;
-}
+.billing-grid { display: grid; grid-template-columns: 1fr 1fr; margin-top: 30px; gap: 20px; }
+.section-title { font-weight: 800; font-size: 0.75rem; color: #888; border-bottom: 1px solid #eee; margin-bottom: 8px; }
+.details p { margin: 2px 0; font-size: 0.85rem; }
 
-.logo-circle img {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-}
+.compliance-item { font-size: 0.85rem; margin-top: 25px; }
+.compliance-item .label { color: #666; margin-right: 8px; }
+.compliance-item .value { font-weight: 700; }
 
-.brand-info h2 {
-  margin: 0;
-  font-size: 1.5rem;
-  color: #000;
-  font-weight: 800;
-}
+.invoice-table { width: 100%; border-collapse: collapse; margin-top: 30px; border: 1px solid #000; }
+.invoice-table th { padding: 8px; background: #f8f8f8; font-size: 0.75rem; border: 1px solid #000; }
+.invoice-table td { padding: 10px 8px; border: 1px solid #000; font-size: 0.85rem; }
 
-.brand-info p {
-  margin: 4px 0;
-  font-size: 0.85rem;
-  color: #666;
-}
+.footer-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 40px; margin-top: 30px; flex: 1; }
+.export-note { font-size: 0.75rem; font-style: italic; color: #444; border-left: 3px solid #000; padding-left: 10px; }
 
-.document-type {
-  font-size: 2.25rem;
-  font-weight: 900;
-  color: var(--color-primary);
-  letter-spacing: 2px;
-  text-align: right;
-  line-height: 1;
-}
+.tax-table { width: 100%; border-collapse: collapse; font-size: 0.7rem; border: 1px solid #eee; }
+.tax-table th, .tax-table td { border: 1px solid #eee; padding: 4px; text-align: right; }
+.tax-table th { background: #fafafa; text-align: center; }
 
-.inv-num {
-  text-align: right;
-  font-size: 1.125rem;
-  font-weight: 700;
-  margin-top: 8px;
-}
+.amount-words { font-size: 0.8rem; font-style: italic; color: #555; }
+.amount-words .label { font-size: 0.7rem; font-weight: 700; color: #999; text-transform: uppercase; }
 
-.date-row {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  font-size: 0.85rem;
-  margin-top: 4px;
-}
+.totals-block { display: flex; flex-direction: column; gap: 8px; border: 1px solid #000; padding: 15px; }
+.totals-block .row { display: flex; justify-content: space-between; font-size: 0.9rem; font-weight: 500; }
+.totals-block .grand-total { border-top: 2px solid #000; padding-top: 10px; font-weight: 800; color: #000; font-size: 1.1rem; }
 
-.date-row .label { color: #999; font-weight: 600; }
-.date-row .value { color: #333; font-weight: 600; }
+.signature-block { text-align: right; }
+.sig-space { height: 60px; }
+.sig-label { font-weight: 800; font-size: 0.9rem; margin: 0; }
+.sig-company { font-size: 0.75rem; color: #666; margin-top: 2px; }
 
-.billing-info {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 40px;
-  margin-bottom: 40px;
-}
-
-.section-title {
-  display: block;
-  font-size: 0.75rem;
-  font-weight: 800;
-  color: #999;
-  letter-spacing: 1px;
-  margin-bottom: 12px;
-  border-bottom: 2px solid #f0f0f0;
-  padding-bottom: 4px;
-}
-
-.client-details h4 { font-size: 1.125rem; margin-bottom: 4px; }
-.client-details p { margin: 2px 0; font-size: 0.9rem; color: #444; }
-
-.invoice-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-bottom: 40px;
-}
-
-.invoice-table th {
-  padding: 12px;
-  background: #f8fafc;
-  color: #64748b;
-  font-size: 0.75rem;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-.invoice-table td {
-  padding: 16px 12px;
-  border-bottom: 1px solid #f1f5f9;
-  font-size: 0.9375rem;
-  color: #334155;
-}
-
-.item-name { font-weight: 600; }
-
-.empty-placeholder {
-  text-align: center;
-  padding: 40px !important;
-  color: #999;
-  font-style: italic;
-}
-
-.invoice-foot {
-  margin-top: auto;
-  display: grid;
-  grid-template-columns: 1.2fr 1fr;
-  gap: 30px;
-}
-
-@media (max-width: 600px) {
-  .invoice-foot {
-    grid-template-columns: 1fr;
-    gap: 20px;
-  }
-}
-
-.notes-block p {
-  font-size: 0.85rem;
-  color: #666;
-  line-height: 1.5;
-}
-
-.totals-block {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.summary-line {
-  display: flex;
-  justify-content: space-between;
-  font-size: 0.9375rem;
-  color: #666;
-}
-
-.summary-line.grand-total {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 2px solid #000;
-  font-size: 1.25rem;
-  font-weight: 800;
-  color: #000;
-}
-
-.summary-line.discount {
-  color: var(--color-danger);
-}
-
-.m-0 { margin: 0; }
-.mt-sm { margin-top: 8px; }
-.mt-md { margin-top: 24px; }
-.text-left { text-align: left; }
-.text-right { text-align: right; }
+.footer-disclaimer { border-top: 1px dashed #ccc; padding-top: 15px; text-align: center; font-size: 0.7rem; color: #888; }
 </style>

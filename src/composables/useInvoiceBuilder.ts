@@ -1,7 +1,7 @@
-import { ref, computed, watch } from 'vue'
-import type { Invoice, InvoiceItem, Product, ClientType } from '../types'
+import { ref, watch } from 'vue'
+import type { Invoice, InvoiceItem, Product } from '../types'
 import { generateId } from '../utils/formatters'
-import { calculateGST } from '../utils/taxUtils'
+import { calculateGST, isB2CLarge } from '../utils/taxUtils'
 
 export function useInvoiceBuilder(initialInvoice?: Invoice, nextNumber?: string) {
   const invoice = ref<Omit<Invoice, 'id'>>({
@@ -12,6 +12,8 @@ export function useInvoiceBuilder(initialInvoice?: Invoice, nextNumber?: string)
     clientType: initialInvoice?.clientType || 'b2b',
     currency: initialInvoice?.currency || 'INR',
     lutNumber: initialInvoice?.lutNumber || '',
+    isTaxableExport: initialInvoice?.isTaxableExport || false,
+    reverseCharge: initialInvoice?.reverseCharge || false,
     placeOfSupply: initialInvoice?.placeOfSupply || '',
     items: initialInvoice?.items || [],
     subtotal: initialInvoice?.subtotal || 0,
@@ -19,6 +21,7 @@ export function useInvoiceBuilder(initialInvoice?: Invoice, nextNumber?: string)
     discount: initialInvoice?.discount || 0,
     discountType: initialInvoice?.discountType || 'percentage',
     totalAmount: initialInvoice?.totalAmount || 0,
+    isRounded: initialInvoice?.isRounded || false,
     status: initialInvoice?.status || 'draft',
     notes: initialInvoice?.notes || '',
     terms: initialInvoice?.terms || ''
@@ -38,8 +41,9 @@ export function useInvoiceBuilder(initialInvoice?: Invoice, nextNumber?: string)
       id: generateId(),
       productId: product.id,
       name: product.name,
+      hsnCode: product.hsnCode,
       quantity: 1,
-      price: product.price,
+      price: product.price, // Tax Inclusive
       taxRate: product.taxRate,
       taxAmount: 0,
       total: 0
@@ -54,32 +58,60 @@ export function useInvoiceBuilder(initialInvoice?: Invoice, nextNumber?: string)
   }
 
   const calculateTotals = () => {
-    let subtotal = 0
-    let taxTotal = 0
+    let subtotalSum = 0
+    let taxSum = 0
+    
+    // 1. Calculate the total weight of original gross amount to apply fixed discount proportionally
+    const totalOriginalGross = invoice.value.items.reduce((sum, item) => sum + (item.price * item.quantity), 0)
     
     invoice.value.items.forEach(item => {
-      const baseAmount = item.price * item.quantity
-      const tax = calculateGST(baseAmount, item.taxRate, invoice.value.clientType, isInterState.value)
+      const originalItemGross = item.price * item.quantity
       
-      item.taxAmount = tax.totalTax
-      item.total = baseAmount + tax.totalTax
+      // 2. Determine the discount for this specific item
+      let itemDiscountValue = 0
+      if (invoice.value.discount > 0) {
+        if (invoice.value.discountType === 'percentage') {
+          itemDiscountValue = (originalItemGross * invoice.value.discount) / 100
+        } else if (totalOriginalGross > 0) {
+          // Weighted distribution for fixed discount
+          itemDiscountValue = (originalItemGross / totalOriginalGross) * invoice.value.discount
+        }
+      }
+
+      // 3. LEGALLY CORRECT: Apply discount to the gross amount BEFORE reverse-calculating tax
+      const netItemGross = Math.max(0, originalItemGross - itemDiscountValue)
       
-      subtotal += baseAmount
-      taxTotal += tax.totalTax
+      const taxResult = calculateGST(
+        netItemGross, 
+        item.taxRate, 
+        invoice.value.clientType, 
+        isInterState.value,
+        invoice.value.isTaxableExport
+      )
+      
+      item.taxAmount = taxResult.totalTax
+      item.total = netItemGross // Final line total (inclusive)
+      
+      subtotalSum += taxResult.baseAmount
+      taxSum += taxResult.totalTax
     })
     
-    invoice.value.subtotal = subtotal
-    invoice.value.taxTotal = taxTotal
+    invoice.value.subtotal = subtotalSum
+    invoice.value.taxTotal = taxSum
     
-    let discountAmount = 0
-    if (invoice.value.discountType === 'percentage') {
-      discountAmount = (subtotal * invoice.value.discount) / 100
-    } else {
-      discountAmount = invoice.value.discount
-    }
+    const rawTotal = subtotalSum + taxSum
     
-    invoice.value.totalAmount = Math.max(0, subtotal + taxTotal - discountAmount)
+    // B2C Large Detection (Inter-state & value > 2.5L)
+    invoice.value.isB2CLarge = isB2CLarge(rawTotal, isInterState.value, invoice.value.clientType || 'b2c')
+    
+    // Rounding
+    invoice.value.totalAmount = invoice.value.isRounded ? Math.round(rawTotal) : rawTotal
   }
+
+  watch(() => invoice.value.isRounded, () => calculateTotals())
+  watch(() => invoice.value.discount, () => calculateTotals())
+  watch(() => invoice.value.discountType, () => calculateTotals())
+  watch([isInterState, () => invoice.value.isTaxableExport], () => calculateTotals())
 
   return {
     invoice,
