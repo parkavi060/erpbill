@@ -665,7 +665,7 @@ onBeforeUnmount(() => {
   top: calc(100% + 8px);
   left: 0;
   width: 240px;
-  z-index: 100;
+  z-index: 2100;
   padding: var(--spacing-sm);
   background: var(--bg-surface);
   box-shadow: var(--shadow-lg);
