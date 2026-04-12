@@ -17,18 +17,23 @@ const getSafeStorage = (): Storage => {
   if (!hasWindow) return new InMemoryStorage()
   
   try {
-    // Check if localStorage exists without directly accessing the property
-    const isAvailable = 'localStorage' in window && window.localStorage !== null
-    if (!isAvailable) return new InMemoryStorage()
+    // Some browsers throw when simply checking if localStorage exists in window
+    if (typeof window.localStorage === 'undefined') {
+      return new InMemoryStorage()
+    }
 
     const storage = window.localStorage
+    
+    // Final test to ensure it's actually usable
     const x = '__storage_test__'
     storage.setItem(x, x)
     storage.removeItem(x)
+    
     return storage
   } catch (e) {
     // This catches "SecurityError: The operation is insecure" 
-    // or "Access to storage is not allowed" errors in Chrome/Safari
+    // and "Access to storage is not allowed" errors
+    console.warn('Storage access is restricted. Using in-memory storage instead.', e)
     return new InMemoryStorage()
   }
 }
