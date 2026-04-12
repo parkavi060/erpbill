@@ -596,7 +596,7 @@ onBeforeUnmount(() => {
   height: 64px;
   flex-shrink: 0;
   position: relative;
-  z-index: 50;
+  z-index: 2000;
 }
 
 .header-left {
@@ -665,7 +665,7 @@ onBeforeUnmount(() => {
   top: calc(100% + 8px);
   left: 0;
   width: 240px;
-  z-index: 100;
+  z-index: 2100;
   padding: var(--spacing-sm);
   background: var(--bg-surface);
   box-shadow: var(--shadow-lg);
@@ -787,7 +787,7 @@ onBeforeUnmount(() => {
   top: calc(100% + 8px);
   right: 0;
   width: 260px;
-  z-index: 100;
+  z-index: 2100;
   padding: var(--spacing-sm);
   transform-origin: top right;
   background-color: var(--bg-surface);
