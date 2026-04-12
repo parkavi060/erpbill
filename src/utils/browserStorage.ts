@@ -18,13 +18,18 @@ const getSafeStorage = (): Storage => {
   
   try {
     // Specifically handle the case where window.localStorage access itself throws
+    // in some browsers (like Chrome with "Block third-party cookies" enabled)
     const storage = window.localStorage
     if (!storage) return new InMemoryStorage()
 
     // Test for actual usability (handles "Access to storage is not allowed")
-    const x = '__storage_test__'
+    // Use a unique key to avoid collisions
+    const x = `__storage_test_${Math.random()}_`
     storage.setItem(x, x)
+    const result = storage.getItem(x)
     storage.removeItem(x)
+    
+    if (result !== x) return new InMemoryStorage()
     
     return storage
   } catch (e) {
