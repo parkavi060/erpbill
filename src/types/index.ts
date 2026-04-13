@@ -4,6 +4,7 @@ export type ClientType = 'b2b' | 'b2c' | 'b2e'
 
 export interface Client {
   id: string
+  _id?: string
   type: ClientType
   name: string
   email: string
@@ -21,6 +22,7 @@ export interface Client {
 
 export interface Product {
   id: string
+  _id?: string
   name: string
   description: string
   price: number
@@ -43,6 +45,7 @@ export interface InvoiceItem {
 
 export interface Invoice {
   id: string
+  _id?: string
   invoiceNumber: string
   date: number
   dueDate: number
@@ -86,6 +89,7 @@ export type PaymentMethod = 'Cash' | 'Bank' | 'UPI' | 'Card'
 
 export interface Transaction {
   id: string
+  _id?: string
   date: number
   type: TransactionType
   category: string
@@ -131,6 +135,15 @@ export interface PermissionRow {
 
 export interface Business {
   id: string
+  _id?: string
   name: string
   profile: BusinessProfile
+}
+
+export interface User {
+  id: string
+  name: string
+  username: string
+  role: string
+  businessId: string
 }

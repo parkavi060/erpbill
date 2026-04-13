@@ -4,6 +4,10 @@ import { useRouter } from 'vue-router'
 import { useThemeStore } from '../stores/theme'
 import { useAuthStore } from '../stores/auth'
 import { useBusinessStore } from '../stores/business'
+import { useClientStore } from '../stores/clients'
+import { useProductStore } from '../stores/products'
+import { useInvoiceStore } from '../stores/invoices'
+import { useTransactionStore } from '../stores/transactions'
 import AppIcon from '../components/atoms/AppIcon.vue'
 import BaseButton from '../components/atoms/BaseButton.vue'
 import CommandPalette from '../components/organisms/CommandPalette.vue'
@@ -202,6 +206,15 @@ const handleGlobalShortcut = (event: KeyboardEvent) => {
 onMounted(() => {
   window.addEventListener('keydown', handleGlobalShortcut)
   window.addEventListener('click', handleClickOutside)
+
+  // Initial Data Fetch
+  if (authStore.isLoggedIn) {
+    businessStore.fetchBusinesses()
+    useClientStore().fetchClients()
+    useProductStore().fetchProducts()
+    useInvoiceStore().fetchInvoices()
+    useTransactionStore().fetchTransactions()
+  }
 })
 
 onBeforeUnmount(() => {
@@ -338,7 +351,7 @@ onBeforeUnmount(() => {
               @click.stop="toggleAccountMenu"
             >
               <div class="user-info">
-                <span class="user-name">{{ authStore.currentUserRole === 'Super Admin' ? 'System Admin' : 'Staff User' }}</span>
+                <span class="user-name">{{ authStore.currentUser?.name || 'System User' }}</span>
                 <span class="user-role">{{ authStore.currentUserRole }}</span>
               </div>
               <div class="avatar-sm">

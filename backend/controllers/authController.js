@@ -8,11 +8,11 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 export const register = async (req, res) => {
-  const { name, email, password, businessName } = req.body;
+  const { name, username, password, businessName } = req.body;
 
   try {
-    const userExists = await User.findOne({ email });
-    if (userExists) return sendError(res, 400, 'User already exists');
+    const userExists = await User.findOne({ username });
+    if (userExists) return sendError(res, 400, 'User already exists with this username');
 
     // Create Business first
     const business = await Business.create({
@@ -22,7 +22,7 @@ export const register = async (req, res) => {
 
     const user = await User.create({
       name,
-      email,
+      username,
       password,
       role: 'Super Admin',
       businessId: business._id
@@ -39,7 +39,7 @@ export const register = async (req, res) => {
     await user.save();
 
     sendResponse(res, 201, 'User registered successfully', {
-      user: { id: user._id, name: user.name, email: user.email, role: user.role, businessId: user.businessId },
+      user: { id: user._id, name: user.name, username: user.username, role: user.role, businessId: user.businessId },
       accessToken,
       refreshToken
     });
@@ -49,10 +49,10 @@ export const register = async (req, res) => {
 };
 
 export const login = async (req, res) => {
-  const { email, password } = req.body;
+  const { username, password } = req.body;
 
   try {
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ username });
     if (user && (await user.comparePassword(password))) {
       const accessToken = generateAccessToken({ id: user._id });
       const refreshToken = generateRefreshToken({ id: user._id });
@@ -61,12 +61,12 @@ export const login = async (req, res) => {
       await user.save();
 
       sendResponse(res, 200, 'Login successful', {
-        user: { id: user._id, name: user.name, email: user.email, role: user.role, businessId: user.businessId },
+        user: { id: user._id, name: user.name, username: user.username, role: user.role, businessId: user.businessId },
         accessToken,
         refreshToken
       });
     } else {
-      sendError(res, 401, 'Invalid email or password');
+      sendError(res, 401, 'Invalid username or password');
     }
   } catch (error) {
     sendError(res, 500, error.message);

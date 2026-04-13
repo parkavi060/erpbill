@@ -2,80 +2,89 @@ import { defineStore } from 'pinia'
 import { ref, watch, computed } from 'vue'
 import type { Business, BusinessProfile } from '../types'
 import { readJSONStorage, writeJSONStorage } from '../utils/browserStorage'
+import api from '../utils/api'
+import { useAuthStore } from './auth'
 
 export const useBusinessStore = defineStore('business', () => {
-  // Try to find existing profile for migration
-  const oldProfile = readJSONStorage<BusinessProfile | null>('settings', null)
-  
-  const initialBusinesses: Business[] = oldProfile ? [
-    { 
-      id: 'default', 
-      name: oldProfile.name || 'Primary Business', 
-      profile: oldProfile 
-    }
-  ] : [
-    {
-      id: 'default',
-      name: 'Primary Business',
-      profile: {
-        name: 'Your Business Name',
-        address: 'Business Address, Chennai, Tamil Nadu',
-        email: 'billing@yourbusiness.com',
-        phone: '+91 0000000000',
-        gstin: '33AABCU1234F1Z5',
-        stateCode: '33'
-      }
-    }
-  ]
+  const authStore = useAuthStore()
+  const businesses = ref<Business[]>(readJSONStorage<Business[]>('businesses', []))
+  const activeBusinessId = ref<string>(readJSONStorage<string>('active_business_id', ''))
 
-  const businesses = ref<Business[]>(readJSONStorage<Business[]>('businesses', initialBusinesses))
-  const activeBusinessId = ref<string>(readJSONStorage<string>('active_business_id', 'default'))
+  // Update activeBusinessId if auth store has a businessId and we don't have one set
+  watch(() => authStore.currentUser?.businessId, (newBizId) => {
+    if (newBizId && !activeBusinessId.value) {
+      activeBusinessId.value = newBizId
+    }
+  }, { immediate: true })
 
   const activeBusiness = computed(() => {
     return businesses.value.find(b => b.id === activeBusinessId.value) || businesses.value[0]
   })
 
+  const fetchBusinesses = async () => {
+    try {
+      const response = await api.get('/businesses')
+      businesses.value = response.data.data
+      if (businesses.value.length > 0 && !activeBusinessId.value) {
+        const firstBiz = businesses.value[0];
+        activeBusinessId.value = (firstBiz?._id || firstBiz?.id) ?? '';
+      }
+    } catch (error) {
+      console.error('Failed to fetch businesses:', error)
+    }
+  }
+
+  const addBusiness = async (name: string) => {
+    try {
+      const response = await api.post('/businesses', { name })
+      const newBiz = response.data.data
+      businesses.value.push(newBiz)
+      return newBiz._id || newBiz.id
+    } catch (error) {
+      console.error('Failed to add business:', error)
+      return ''
+    }
+  }
+
+  const updateActiveProfile = async (profile: Partial<BusinessProfile>) => {
+    const biz = businesses.value.find(b => (b._id || b.id) === activeBusinessId.value)
+    if (biz) {
+      try {
+        const id = biz._id || biz.id
+        const response = await api.put(`/businesses/${id}`, { profile: { ...biz.profile, ...profile } })
+        const updatedBiz = response.data.data
+        const index = businesses.value.findIndex(b => (b._id || b.id) === id)
+        if (index !== -1) {
+          businesses.value[index] = updatedBiz
+        }
+      } catch (error) {
+        console.error('Failed to update business profile:', error)
+      }
+    }
+  }
+
+  const deleteBusinessById = async (id: string) => {
+    try {
+      await api.delete(`/businesses/${id}`)
+      businesses.value = businesses.value.filter(b => (b._id || b.id) !== id)
+      if (activeBusinessId.value === id && businesses.value.length > 0) {
+        const firstBiz = businesses.value[0];
+        activeBusinessId.value = (firstBiz?._id || firstBiz?.id) ?? '';
+      }
+    } catch (error) {
+      console.error('Failed to delete business:', error)
+    }
+  }
+
   const switchBusiness = (id: string) => {
-    if (businesses.value.some(b => b.id === id)) {
+    if (businesses.value.some(b => (b._id || b.id) === id)) {
       activeBusinessId.value = id
-      // Force reload to ensure other stores re-initialize
+      // Force reload to ensure other stores re-initialize with new business context
       window.location.reload()
     }
   }
 
   const canAddBusiness = computed(() => businesses.value.length < 5)
-
-  const addBusiness = (name: string) => {
-    if (!canAddBusiness.value) return ''
-    const newId = `biz_${crypto.randomUUID().slice(0, 8)}`
-    const baseBiz = businesses.value[0]
-    if (!baseBiz) return '' // Should never happen
-    
-    const newBusiness: Business = {
-      id: newId,
-      name,
-      profile: { ...baseBiz.profile, name }
-    }
-    businesses.value.push(newBusiness)
-    return newId
-  }
-
-  const updateActiveProfile = (profile: Partial<BusinessProfile>) => {
-    const biz = businesses.value.find(b => b.id === activeBusinessId.value)
-    if (biz) {
-      biz.profile = { ...biz.profile, ...profile }
-      biz.name = biz.profile.name || biz.name
-    }
-  }
-
-  const deleteBusiness = (id: string) => {
-    if (businesses.value.length <= 1) return
-    businesses.value = businesses.value.filter(b => b.id !== id)
-    if (activeBusinessId.value === id && businesses.value.length > 0) {
-      activeBusinessId.value = businesses.value[0]!.id
-      window.location.reload()
-    }
-  }
 
   // Persist
   watch(businesses, (newVal) => {
@@ -91,9 +100,10 @@ export const useBusinessStore = defineStore('business', () => {
     activeBusinessId,
     activeBusiness,
     canAddBusiness,
+    fetchBusinesses,
     switchBusiness,
     addBusiness,
     updateActiveProfile,
-    deleteBusiness
+    deleteBusiness: deleteBusinessById
   }
 })
