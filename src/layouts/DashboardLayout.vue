@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useThemeStore } from '../stores/theme'
 import { useAuthStore } from '../stores/auth'
+import { useRoleStore } from '../stores/role'
 import { useBusinessStore } from '../stores/business'
 import { useClientStore } from '../stores/clients'
 import { useProductStore } from '../stores/products'
@@ -14,6 +15,7 @@ import CommandPalette from '../components/organisms/CommandPalette.vue'
 
 const themeStore = useThemeStore()
 const authStore = useAuthStore()
+const roleStore = useRoleStore()
 const businessStore = useBusinessStore()
 const router = useRouter()
 const isCollapsed = ref(false)
@@ -210,10 +212,7 @@ onMounted(() => {
   // Initial Data Fetch
   if (authStore.isLoggedIn) {
     businessStore.fetchBusinesses()
-    useClientStore().fetchClients()
-    useProductStore().fetchProducts()
-    useInvoiceStore().fetchInvoices()
-    useTransactionStore().fetchTransactions()
+    roleStore.fetchRoles()
   }
 })
 
@@ -377,8 +376,8 @@ onBeforeUnmount(() => {
                   </div>
                   
                   <button 
-                    v-for="role in authStore.roles" 
-                    :key="role.id" 
+                    v-for="role in roleStore.roles" 
+                    :key="role.id || (role as any)._id" 
                     class="dropdown-item" 
                     :class="{ 'text-primary': authStore.currentUserRole === role.name }"
                     @click="authStore.setRole(role.name)"
