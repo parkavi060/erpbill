@@ -13,32 +13,32 @@ const authStore = useAuthStore()
 const isLoading = ref(false)
 const errorMessage = ref('')
 const loginForm = reactive({
-  email: '',
+  username: '',
   password: '',
   rememberMe: false
 })
 
 const handleLogin = async () => {
-  if (!loginForm.email || !loginForm.password) {
-    errorMessage.value = 'Please enter both email and password.'
+  if (!loginForm.username || !loginForm.password) {
+    errorMessage.value = 'Please enter both username and password.'
     return
   }
 
   isLoading.value = true
   errorMessage.value = ''
 
-  // Simulate API delay
   try {
-    await new Promise(resolve => setTimeout(resolve, 800))
-    
-    // Perform login (accepts any credentials as per user request)
-    authStore.login()
+    // Perform real login with credentials
+    await authStore.login({
+      username: loginForm.username,
+      password: loginForm.password
+    })
     
     // Redirect to intended page or dashboard
     const redirectPath = route.query.redirect as string || '/'
     router.push(redirectPath)
-  } catch (err) {
-    errorMessage.value = 'An error occurred during login. Please try again.'
+  } catch (err: any) {
+    errorMessage.value = err.response?.data?.message || 'Login failed. Please check your credentials.'
   } finally {
     isLoading.value = false
   }
@@ -69,10 +69,10 @@ const handleLogin = async () => {
         </div>
 
         <BaseInput 
-          v-model="loginForm.email"
-          label="Email Address"
-          type="email"
-          placeholder="admin@bill-soft.com"
+          v-model="loginForm.username"
+          label="Username"
+          type="text"
+          placeholder="admin"
           required
           :disabled="isLoading"
         />

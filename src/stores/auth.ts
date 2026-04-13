@@ -1,21 +1,24 @@
+/* src/stores/auth.ts */
 import { defineStore } from 'pinia'
-import { ref, watch, computed } from 'vue'
-import type { Role, PermissionRow, PermissionLevel } from '../types'
-import { readJSONStorage, writeJSONStorage } from '../utils/browserStorage'
-import type { ClientType } from '../types'
+import { ref, watch } from 'vue'
+import type { Role, PermissionRow, PermissionLevel, User, ClientType } from '../types'
+import { readJSONStorage, writeJSONStorage, writeStringStorage, readStringStorage } from '../utils/browserStorage'
+import api from '../utils/api'
 
 export const useAuthStore = defineStore('auth', () => {
+  const currentUser = ref<User | null>(
+    readJSONStorage<User | null>('auth_user', null)
+  )
+
   const currentUserRole = ref<string>(
-    readJSONStorage<string>('auth_current_role', 'Super Admin')
+    currentUser.value?.role || readStringStorage('auth_current_role', 'Super Admin')
   )
 
   const currentType = ref<ClientType>(
     readJSONStorage<ClientType>('auth_current_bill_type', 'b2b')
   )
 
-  const isLoggedIn = ref<boolean>(
-    readJSONStorage<boolean>('auth_is_logged_in', false)
-  )
+  const isLoggedIn = ref<boolean>(!!readStringStorage('auth_token', ''))
 
   const roles = ref<Role[]>([
     { id: 1, name: 'Super Admin', desc: 'Can manage billing platform and create new client tenants.' },
@@ -44,12 +47,50 @@ export const useAuthStore = defineStore('auth', () => {
     currentType.value = type
   }
 
-  const login = () => {
-    isLoggedIn.value = true
+  const logout = () => {
+    currentUser.value = null;
+    currentUserRole.value = 'Super Admin';
+    isLoggedIn.value = false;
+    writeStringStorage('auth_token', '');
+    writeJSONStorage('auth_user', null);
   }
 
-  const logout = () => {
-    isLoggedIn.value = false
+  const fetchProfile = async (): Promise<void> => {
+    try {
+      const response = await api.get('/auth/me');
+      const { user } = response.data.data;
+      currentUser.value = user;
+      currentUserRole.value = user.role;
+    } catch (error) {
+      console.error('Failed to fetch profile:', error);
+      logout();
+    }
+  }
+
+  const login = async (credentials: { username: string; password: string }): Promise<void> => {
+    try {
+      const response = await api.post('/auth/login', credentials);
+      const { user, accessToken } = response.data.data;
+      
+      currentUser.value = user;
+      currentUserRole.value = user.role;
+      isLoggedIn.value = true;
+      
+      writeStringStorage('auth_token', accessToken);
+      writeJSONStorage('auth_user', user);
+      writeStringStorage('auth_current_role', user.role);
+      
+      // Fetch fresh profile to ensure all data is in sync
+      await fetchProfile();
+    } catch (error: any) {
+      console.error('Login failed:', error.response?.data?.message || error.message);
+      throw error;
+    }
+  }
+
+  // Initial fetch if token exists
+  if (readStringStorage('auth_token', '')) {
+    fetchProfile();
   }
 
   const updateMatrix = (newMatrix: PermissionRow[]) => {
@@ -83,10 +124,14 @@ export const useAuthStore = defineStore('auth', () => {
   })
 
   watch(isLoggedIn, (newVal) => {
-    writeJSONStorage('auth_is_logged_in', newVal)
+    if (!newVal) {
+      writeStringStorage('auth_token', '')
+      writeJSONStorage('auth_user', null)
+    }
   })
 
   return {
+    currentUser,
     currentUserRole,
     currentType,
     isLoggedIn,
@@ -96,6 +141,7 @@ export const useAuthStore = defineStore('auth', () => {
     setType,
     login,
     logout,
+    fetchProfile,
     updateMatrix,
     canAccess
   }

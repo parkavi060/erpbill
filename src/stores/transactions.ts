@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, watch, computed } from 'vue'
 import type { Transaction } from '../types'
 import { readJSONStorage, writeJSONStorage } from '../utils/browserStorage'
+import api from '../utils/api'
 import { useBusinessStore } from './business'
 
 // Financial transaction ledger store
@@ -10,22 +11,43 @@ export const useTransactionStore = defineStore('transactions', () => {
   const storageKey = `transactions_${businessStore.activeBusinessId}`
   const transactions = ref<Transaction[]>(readJSONStorage<Transaction[]>(storageKey, []))
 
-  const addTransaction = (transaction: Omit<Transaction, 'id'>) => {
-    const newTransaction: Transaction = {
-      ...transaction,
-      id: crypto.randomUUID()
+  const fetchTransactions = async () => {
+    try {
+      const response = await api.get('/transactions')
+      transactions.value = response.data.data
+    } catch (error) {
+      console.error('Failed to fetch transactions:', error)
     }
-    transactions.value.push(newTransaction)
   }
 
-  const deleteTransaction = (id: string) => {
-    transactions.value = transactions.value.filter(t => t.id !== id)
+  const addTransaction = async (transaction: Omit<Transaction, 'id'>) => {
+    try {
+      const response = await api.post('/transactions', transaction)
+      transactions.value.push(response.data.data)
+    } catch (error) {
+      console.error('Failed to add transaction:', error)
+    }
   }
 
-  const updateTransaction = (updated: Transaction) => {
-    const index = transactions.value.findIndex(t => t.id === updated.id)
-    if (index !== -1) {
-      transactions.value[index] = updated
+  const updateTransaction = async (updated: Transaction) => {
+    try {
+      const id = updated._id || updated.id
+      const response = await api.put(`/transactions/${id}`, updated)
+      const index = transactions.value.findIndex(t => (t._id || t.id) === id)
+      if (index !== -1) {
+        transactions.value[index] = response.data.data
+      }
+    } catch (error) {
+      console.error('Failed to update transaction:', error)
+    }
+  }
+
+  const deleteTransactionById = async (id: string) => {
+    try {
+      await api.delete(`/transactions/${id}`)
+      transactions.value = transactions.value.filter(t => (t._id || t.id) !== id)
+    } catch (error) {
+      console.error('Failed to delete transaction:', error)
     }
   }
 
@@ -96,8 +118,9 @@ export const useTransactionStore = defineStore('transactions', () => {
 
   return {
     transactions,
+    fetchTransactions,
     addTransaction,
-    deleteTransaction,
+    deleteTransaction: deleteTransactionById,
     updateTransaction,
     totalIncome,
     totalExpense,

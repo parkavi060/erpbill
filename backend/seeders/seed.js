@@ -23,10 +23,10 @@ const seed = async () => {
     }
 
     console.log('Seeding Super Admin and Business...');
-    const adminEmail = process.env.SEED_ADMIN_EMAIL || 'admin@erpbill.com';
+    const adminUsername = 'admin';
     const adminPassword = process.env.SEED_ADMIN_PASSWORD || 'Admin@123';
 
-    let admin = await User.findOne({ email: adminEmail });
+    let admin = await User.findOne({ username: adminUsername });
     if (!admin) {
       // Create first business
       const business = await Business.create({
@@ -36,7 +36,7 @@ const seed = async () => {
 
       admin = await User.create({
         name: 'System Administrator',
-        email: adminEmail,
+        username: adminUsername,
         password: adminPassword,
         role: 'Super Admin',
         businessId: business._id
@@ -45,7 +45,7 @@ const seed = async () => {
       business.ownerId = admin._id;
       await business.save();
 
-      console.log('Super Admin created:', adminEmail);
+      console.log('Super Admin created:', adminUsername);
     } else {
       console.log('Super Admin already exists');
     }
